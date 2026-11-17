@@ -1,0 +1,6 @@
+../Core/Src/mpu6050.c:12:26:MPU6050_WriteReg	32	static
+../Core/Src/mpu6050.c:18:26:MPU6050_ReadRegs	40	static
+../Core/Src/mpu6050.c:24:19:MPU6050_Init	24	static
+../Core/Src/mpu6050.c:71:19:MPU6050_Read_All	32	static
+../Core/Src/mpu6050.c:100:19:MPU6050_Calibrate_Gyro	40	static
+../Core/Src/mpu6050.c:127:6:MPU6050_Update_Angle	40	static
