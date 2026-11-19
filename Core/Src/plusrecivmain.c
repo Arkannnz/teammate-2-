@@ -204,11 +204,8 @@ int main(void)
     }
 
 #if USE_MAVLINK
-    // E. Kirim Telemetri MAVLink ke PC setiap 20ms (50 Hz)
-    if (current_tick - last_mav_tick >= 20) {
-        last_mav_tick = current_tick;
-        mav_send_imu(mpu.roll, mpu.pitch, mpu.roll, mpu.pitch);
-    }
+    // E. Proses perintah tuning parameter QGC & kirim telemetri MAVLink 50 Hz
+    mav_telemetry_update(mpu.roll, mpu.pitch, mpu.roll, mpu.pitch);
 #endif
     /* USER CODE END WHILE */
 
