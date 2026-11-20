@@ -15,9 +15,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "mpu6050.h"
-#include "bmp280.h"
+#include "bmp180.h"
 #include "servo.h"
 #include "pid.h"
+#include "sbus.h"
+#include "mav_telemetry.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -27,7 +29,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define USE_MAVLINK         1       // 1 = aktifkan telemetri MAVLink ke PC, 0 = matikan
+#define MAX_STAB_ANGLE      30.0f   // Batas sudut target saat mode Stabilize PID (derajat)
+#define MAX_MANUAL_DEFLECT  45.0f   // Batas defleksi servo saat mode Manual (derajat)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -41,17 +45,23 @@ I2C_HandleTypeDef hi2c1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 
+UART_HandleTypeDef huart1;
+
 /* USER CODE BEGIN PV */
 MPU6050_t mpu;
-BMP280_t  bmp;
+BMP180_t  bmp;
+SBUS_t    sbus;
+
+uint8_t   bmp_ok = 0;
 
 // Objek aktuator permukaan kendali (Dual Aileron & Elevator)
 Servo_t servo_aileron_right;  // TIM2 CH1 (PA0)
 Servo_t servo_aileron_left;   // TIM2 CH2 (PA1)
 Servo_t servo_elevator;       // TIM2 CH3 (PA2)
 
-// Objek PID untuk kestabilan Roll (Aileron)
+// Objek PID untuk kestabilan Roll (Aileron) dan Pitch (Elevator)
 PID_t pid_roll;
+PID_t pid_pitch;
 
 uint32_t last_tick = 0;
 /* USER CODE END PV */
@@ -62,6 +72,7 @@ static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -104,6 +115,7 @@ int main(void)
   MX_TIM2_Init();
   MX_USB_DEVICE_Init();
   MX_TIM3_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
   // 1. Inisialisasi Servo Sesuai Konfigurasi Fisik
@@ -116,13 +128,26 @@ int main(void)
       MPU6050_Calibrate_Gyro(&hi2c1, &mpu, 500);
   }
 
-  // 3. Inisialisasi BMP280 & Ambil Baseline Altitude (Ground Level)
-  if (BMP280_Init(&hi2c1, &bmp)) {
-      BMP280_Calibrate_Altitude(&hi2c1, &bmp, 50);
+  // 3. Inisialisasi BMP180 & Ambil Baseline Altitude (Ground Level)
+  if (BMP180_Init(&hi2c1, &bmp)) {
+      bmp_ok = 1;
+      BMP180_Calibrate_Altitude(&hi2c1, &bmp, 30);
   }
 
-  // 4. Inisialisasi PID untuk Roll
-  PID_Init(&pid_roll, 1.2f, 0.05f, 0.1f, -45.0f, 45.0f);
+  // 4. Inisialisasi Receiver SBUS pada USART1 (PA10)
+  SBUS_Init(&sbus, &huart1);
+
+  // 5. Inisialisasi PID untuk Roll (Aileron) dan Pitch (Elevator)
+  PID_Init(&pid_roll,  1.2f, 0.05f, 0.1f, -45.0f, 45.0f);
+  PID_Init(&pid_pitch, 1.2f, 0.05f, 0.1f, -45.0f, 45.0f);
+
+  // 6. Daftarkan parameter PID agar dapat di-tuning langsung dari QGroundControl
+  mav_register_param("PID_ROLL_P",  &pid_roll.Kp);
+  mav_register_param("PID_ROLL_I",  &pid_roll.Ki);
+  mav_register_param("PID_ROLL_D",  &pid_roll.Kd);
+  mav_register_param("PID_PITCH_P", &pid_pitch.Kp);
+  mav_register_param("PID_PITCH_I", &pid_pitch.Ki);
+  mav_register_param("PID_PITCH_D", &pid_pitch.Kd);
 
   last_tick = HAL_GetTick();
   /* USER CODE END 2 */
@@ -143,20 +168,56 @@ int main(void)
             MPU6050_Update_Angle(&mpu);
         }
 
-        // B. Baca Barometer (Suhu, Tekanan, Ketinggian)
-        BMP280_Read_All(&hi2c1, &bmp);
+        // B. Baca Barometer BMP180 (Suhu, Tekanan, Ketinggian)
+        if (bmp_ok) {
+            BMP180_Update(&hi2c1, &bmp);
+        }
 
-        // C. Hitung Koreksi PID untuk Sumbu Roll
-        float roll_setpoint = 0.0f;
-        float pid_output = PID_Compute(&pid_roll, roll_setpoint, mpu.roll, dt);
+        // C. Pembacaan Perintah Receiver SBUS & Perhitungan Kendali
+        float roll_cmd  = 0.0f;
+        float pitch_cmd = 0.0f;
 
-        // D. Mixing ke Servo Aileron Kanan & Kiri
-        float aileron_right_angle = 90.0f + pid_output;
-        float aileron_left_angle  = 90.0f - pid_output;
+        if (SBUS_IsConnected(&sbus)) {
+            // Channel 5 (indeks 4) sebagai sakelar mode terbang (> 1500 = Stabilize PID)
+            uint8_t mode_stabilize = (sbus.channels[4] > 1500) ? 1 : 0;
+
+            if (mode_stabilize) {
+                // Mode Stabilize: Stik menentukan target sudut (-30° s.d. +30°), PID mengoreksi
+                float roll_setpoint  = SBUS_ChannelToFloat(sbus.channels[0], -MAX_STAB_ANGLE, MAX_STAB_ANGLE);
+                float pitch_setpoint = SBUS_ChannelToFloat(sbus.channels[1], -MAX_STAB_ANGLE, MAX_STAB_ANGLE);
+
+                roll_cmd  = PID_Compute(&pid_roll,  roll_setpoint,  mpu.roll,  dt);
+                pitch_cmd = PID_Compute(&pid_pitch, pitch_setpoint, mpu.pitch, dt);
+            } else {
+                // Mode Manual: Stik langsung menggerakkan bidang kendali (-45° s.d. +45°)
+                PID_Reset(&pid_roll);
+                PID_Reset(&pid_pitch);
+
+                roll_cmd  = SBUS_ChannelToFloat(sbus.channels[0], -MAX_MANUAL_DEFLECT, MAX_MANUAL_DEFLECT);
+                pitch_cmd = SBUS_ChannelToFloat(sbus.channels[1], -MAX_MANUAL_DEFLECT, MAX_MANUAL_DEFLECT);
+            }
+        } else {
+            // Failsafe: Sinyal receiver hilang -> netralkan bidang kendali
+            PID_Reset(&pid_roll);
+            PID_Reset(&pid_pitch);
+            roll_cmd  = 0.0f;
+            pitch_cmd = 0.0f;
+        }
+
+        // D. Mixing ke Servo Aileron Kanan, Aileron Kiri, dan Elevator
+        float aileron_right_angle = 90.0f + roll_cmd;
+        float aileron_left_angle  = 90.0f - roll_cmd;
+        float elevator_angle      = 90.0f + pitch_cmd;
 
         Servo_SetAngle(&servo_aileron_right, aileron_right_angle);
         Servo_SetAngle(&servo_aileron_left,  aileron_left_angle);
+        Servo_SetAngle(&servo_elevator,      elevator_angle);
     }
+
+#if USE_MAVLINK
+    // E. Proses perintah tuning parameter QGC & kirim telemetri MAVLink 50 Hz
+    mav_telemetry_update(mpu.roll, mpu.pitch, mpu.roll, mpu.pitch);
+#endif
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -324,6 +385,27 @@ static void MX_TIM3_Init(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 100000;
+  huart1.Init.WordLength = UART_WORDLENGTH_9B;
+  huart1.Init.StopBits = UART_STOPBITS_2;
+  huart1.Init.Parity = UART_PARITY_EVEN;
+  huart1.Init.Mode = UART_MODE_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -337,7 +419,10 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    SBUS_UART_RxCpltCallback(&sbus, huart);
+}
 /* USER CODE END 4 */
 
 /**
