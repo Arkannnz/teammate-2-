@@ -1,0 +1,5 @@
+../Core/Src/s.bus.c:3:13:SBUS_ParseFrame	24	static
+../Core/Src/s.bus.c:29:6:SBUS_Init	24	static
+../Core/Src/s.bus.c:44:6:SBUS_UART_RxCpltCallback	24	static
+../Core/Src/s.bus.c:75:9:SBUS_IsConnected	16	static
+../Core/Src/s.bus.c:82:7:SBUS_ChannelToFloat	24	static

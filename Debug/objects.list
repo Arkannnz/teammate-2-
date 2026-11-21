@@ -1,4 +1,3 @@
-"./Core/Src/bmp180.o"
 "./Core/Src/bmp280.o"
 "./Core/Src/main.o"
 "./Core/Src/mpu6050.o"
