@@ -41,7 +41,7 @@ typedef struct {
     float temp;             /* °C    */
 
     /* Sudut hasil complementary filter */
-    float roll, pitch;      /* derajat */
+    float roll, pitch, yaw;      /* derajat */
 
     /* Offset kalibrasi gyro (deg/s) */
     float gx_off, gy_off, gz_off;

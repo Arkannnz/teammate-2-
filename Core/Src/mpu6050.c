@@ -26,7 +26,7 @@ HAL_StatusTypeDef MPU6050_Init(I2C_HandleTypeDef *hi2c, MPU6050_t *dev)
     HAL_StatusTypeDef st;
 
     dev->gx_off = dev->gy_off = dev->gz_off = 0.0f;
-    dev->roll = dev->pitch = 0.0f;
+    dev->roll = dev->pitch = dev-> yaw = 0.0f;
     dev->angle_init = 0;
 
     /* Cek apakah device ada di bus */
@@ -137,6 +137,7 @@ void MPU6050_Update_Angle(MPU6050_t *dev)
     if (!dev->angle_init) {
         dev->roll  = acc_roll;
         dev->pitch = acc_pitch;
+        dev->yaw   = 0.0f;
         dev->angle_init = 1;
         return;
     }
@@ -144,4 +145,13 @@ void MPU6050_Update_Angle(MPU6050_t *dev)
     /* Complementary filter: gyro (jangka pendek) + accel (jangka panjang) */
     dev->roll  = COMP_ALPHA * (dev->roll  + dev->gx * dt) + (1.0f - COMP_ALPHA) * acc_roll;
     dev->pitch = COMP_ALPHA * (dev->pitch + dev->gy * dt) + (1.0f - COMP_ALPHA) * acc_pitch;
+
+    /* Integrasi yaw relatif dari Z-gyro dengan deadband 0.3 deg/s untuk mengurangi drift diam */
+    if (dev->gz > 0.3f || dev->gz < -0.3f) {
+        dev->yaw += dev->gz * dt;
+    }
+
+    /* Bungkus sudut ke rentang -180° s.d. +180° */
+    if (dev->yaw > 180.0f)  dev->yaw -= 360.0f;
+    if (dev->yaw < -180.0f) dev->yaw += 360.0f;
 }

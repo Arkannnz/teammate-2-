@@ -3,4 +3,4 @@
 ../Core/Src/mpu6050.c:24:19:MPU6050_Init	10
 ../Core/Src/mpu6050.c:71:19:MPU6050_Read_All	2
 ../Core/Src/mpu6050.c:100:19:MPU6050_Calibrate_Gyro	4
-../Core/Src/mpu6050.c:127:6:MPU6050_Update_Angle	2
+../Core/Src/mpu6050.c:127:6:MPU6050_Update_Angle	6
