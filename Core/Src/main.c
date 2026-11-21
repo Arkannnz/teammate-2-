@@ -140,16 +140,22 @@ int main(void)
   SBUS_Init(&sbus, &huart2);
 
   // 5. Inisialisasi PID untuk Roll (Aileron) dan Pitch (Elevator)
-  PID_Init(&pid_roll,  1.2f, 0.05f, 0.1f, -45.0f, 45.0f);
-  PID_Init(&pid_pitch, 1.2f, 0.05f, 0.1f, -45.0f, 45.0f);
+  PID_Init(&pid_roll,  0.8f, 0.05f, 0.1f, -45.0f, 45.0f);
+  PID_Init(&pid_pitch, 0.8f, 0.05f, 0.1f, -45.0f, 45.0f);
 
-  // 6. Daftarkan parameter PID agar dapat di-tuning langsung dari QGroundControl
+  // 6. Daftarkan parameter PID & aktifkan RX UART1 jika MAV_OVER_UART == 1
+#if USE_MAVLINK
   mav_register_param("PID_ROLL_P",  &pid_roll.Kp);
   mav_register_param("PID_ROLL_I",  &pid_roll.Ki);
   mav_register_param("PID_ROLL_D",  &pid_roll.Kd);
   mav_register_param("PID_PITCH_P", &pid_pitch.Kp);
   mav_register_param("PID_PITCH_I", &pid_pitch.Ki);
   mav_register_param("PID_PITCH_D", &pid_pitch.Kd);
+
+  #if MAV_OVER_UART
+  mav_uart_start_rx();
+  #endif
+#endif
 
   last_tick = HAL_GetTick();
   /* USER CODE END 2 */
@@ -223,7 +229,7 @@ int main(void)
     }
 
 #if USE_MAVLINK
-    mav_telemetry_update(mpu.roll, mpu.pitch, mpu.roll, mpu.pitch, mpu.yaw, bmp.altitude);
+    mav_telemetry_update(mpu.roll, mpu.pitch, roll_cmd, pitch_cmd, mpu.yaw, bmp.altitude);
 #endif
     /* USER CODE END WHILE */
 
@@ -408,7 +414,7 @@ static void MX_TIM3_Init(void)
 static void MX_USART1_UART_Init(void)
 {
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 57600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -457,7 +463,14 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    SBUS_UART_RxCpltCallback(&sbus, huart);
+    if (huart->Instance == USART2) {
+        SBUS_UART_RxCpltCallback(&sbus, huart);
+    }
+#if USE_MAVLINK && MAV_OVER_UART
+    if (huart->Instance == USART1) {
+        mav_uart_rx_callback(huart);
+    }
+#endif
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
@@ -468,6 +481,11 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         __HAL_UART_CLEAR_NEFLAG(huart);
         HAL_UART_Receive_IT(huart, &sbus.rx_byte, 1);
     }
+#if USE_MAVLINK && MAV_OVER_UART
+    if (huart->Instance == USART1) {
+        mav_uart_error_callback(huart);
+    }
+#endif
 }
 /* USER CODE END 4 */
 

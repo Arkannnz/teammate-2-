@@ -37,13 +37,6 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../USB_DEVICE/Target/usbd_conf.h ../Core/Inc/mpu6050.h \
  ../Core/Inc/bmp280.h ../Core/Inc/main.h ../Core/Inc/servo.h \
  ../Core/Inc/pid.h ../Core/Inc/sbus.h ../Core/Inc/mav_telemetry.h \
- ../USB_DEVICE/App/usbd_cdc_if.h \
- ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc/usbd_cdc.h \
- ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h \
- ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_def.h \
- ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_core.h \
- ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h \
- ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h \
  C:/Users/eanad/STM32CubeIDE/workspace_1.17.0/2_teammate/Core/Inc/c_library_v2/common/mavlink.h \
  C:/Users/eanad/STM32CubeIDE/workspace_1.17.0/2_teammate/Core/Inc/c_library_v2/common/version.h \
  C:/Users/eanad/STM32CubeIDE/workspace_1.17.0/2_teammate/Core/Inc/c_library_v2/common/common.h \
@@ -335,13 +328,6 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Core/Inc/pid.h:
 ../Core/Inc/sbus.h:
 ../Core/Inc/mav_telemetry.h:
-../USB_DEVICE/App/usbd_cdc_if.h:
-../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc/usbd_cdc.h:
-../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h:
-../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_def.h:
-../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_core.h:
-../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h:
-../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h:
 C:/Users/eanad/STM32CubeIDE/workspace_1.17.0/2_teammate/Core/Inc/c_library_v2/common/mavlink.h:
 C:/Users/eanad/STM32CubeIDE/workspace_1.17.0/2_teammate/Core/Inc/c_library_v2/common/version.h:
 C:/Users/eanad/STM32CubeIDE/workspace_1.17.0/2_teammate/Core/Inc/c_library_v2/common/common.h:
