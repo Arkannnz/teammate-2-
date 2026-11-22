@@ -30,7 +30,7 @@
 #define USE_MAVLINK         1       // 1 = aktifkan telemetri MAVLink ke PC, 0 = matikan
 #define MAX_STAB_ANGLE      30.0f   // Batas sudut target saat mode Stabilize PID (derajat)
 #define MAX_MANUAL_DEFLECT  45.0f   // Batas defleksi servo saat mode Manual (derajat)
-#define TEST_SENSOR_ONLY    1       // 1 = tes servo pakai sensor tanpa SBUS, 0 = normal pakai SBUS
+#define TEST_SENSOR_ONLY    0       // 1 = tes servo pakai sensor tanpa SBUS, 0 = normal pakai SBUS
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -140,8 +140,8 @@ int main(void)
   SBUS_Init(&sbus, &huart2);
 
   // 5. Inisialisasi PID untuk Roll (Aileron) dan Pitch (Elevator)
-  PID_Init(&pid_roll,  0.8f, 0.05f, 0.1f, -45.0f, 45.0f);
-  PID_Init(&pid_pitch, 0.8f, 0.05f, 0.1f, -45.0f, 45.0f);
+  PID_Init(&pid_roll,  0.8f, 0.05f, 0.1f, -90.0f, 90.0f);
+  PID_Init(&pid_pitch, 0.8f, 0.05f, 0.1f, -90.0f, 90.0f);
 
   // 6. Daftarkan parameter PID & aktifkan RX UART1 jika MAV_OVER_UART == 1
 #if USE_MAVLINK
