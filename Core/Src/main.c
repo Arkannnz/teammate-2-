@@ -27,10 +27,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define USE_MAVLINK         1       // 1 = aktifkan telemetri MAVLink ke PC, 0 = matikan
+#define USE_MAVLINK         1       // 1 = aktifkan telemetri MAVLink ke Mission Planner, 0 = matikan
 #define MAX_STAB_ANGLE      30.0f   // Batas sudut target saat mode Stabilize PID (derajat)
 #define MAX_MANUAL_DEFLECT  45.0f   // Batas defleksi servo saat mode Manual (derajat)
-#define TEST_SENSOR_ONLY    0       // 1 = tes servo pakai sensor tanpa SBUS, 0 = normal pakai SBUS
+#define TEST_SENSOR_ONLY    0       // 0 = mode terbang normal (Manual <-> Stabilize via SBUS), 1 = tes sensor saja
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,7 +57,7 @@ uint8_t   bmp_ok = 0;
 // Objek aktuator permukaan kendali (Dual Aileron & Elevator)
 Servo_t servo_aileron_right;  // TIM2 CH1 (PA0)
 Servo_t servo_aileron_left;   // TIM2 CH2 (PA1)
-Servo_t servo_elevator;       // TIM2 CH3 (PB10)
+Servo_t servo_elevator;       // TIM2 CH3 (PA2 / PB10)
 
 // Objek PID untuk kestabilan Roll (Aileron) dan Pitch (Elevator)
 PID_t pid_roll;
@@ -92,11 +92,14 @@ static void MX_USART2_UART_Init(void);
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
@@ -115,22 +118,25 @@ int main(void)
   MX_I2C1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
-  MX_USB_DEVICE_Init();
   MX_USART1_UART_Init();
+  MX_USB_DEVICE_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  // 1. Inisialisasi Servo Sesuai Konfigurasi Fisik
-  Servo_Init(&servo_aileron_right, &htim2, TIM_CHANNEL_1); // PA0 -> Aileron Kanan
-  Servo_Init(&servo_aileron_left,  &htim2, TIM_CHANNEL_2); // PA1 -> Aileron Kiri
-  Servo_Init(&servo_elevator,      &htim2, TIM_CHANNEL_3); // PB10 -> Elevator
+  // Jeda 100 ms agar sensor selesai power-up saat baterai dicolok
+  HAL_Delay(100);
 
-  // 2. Inisialisasi Sensor MPU6050 & Kalibrasi Gyro (Pastikan board diam saat start!)
+  // 1. Inisialisasi Servo Sesuai Konfigurasi Fisik
+  Servo_Init(&servo_aileron_right, &htim2, TIM_CHANNEL_1); // Aileron Kanan
+  Servo_Init(&servo_aileron_left,  &htim2, TIM_CHANNEL_2); // Aileron Kiri
+  Servo_Init(&servo_elevator,      &htim2, TIM_CHANNEL_3); // Elevator
+
+  // 2. Inisialisasi Sensor MPU6050 & Kalibrasi Gyro (Pastikan pesawat diam datar saat start!)
   if (MPU6050_Init(&hi2c1, &mpu) == HAL_OK) {
       MPU6050_Calibrate_Gyro(&hi2c1, &mpu, 500);
   }
 
-  // 3. Inisialisasi BMP280 & Ambil Baseline Altitude (Ground Level)
+  // 3. Inisialisasi Barometer & Ambil Baseline Altitude (Ground Level)
   if (BMP280_Init(&hi2c1, &bmp)) {
       bmp_ok = 1;
       BMP280_Calibrate_Altitude(&hi2c1, &bmp, 30);
@@ -140,10 +146,10 @@ int main(void)
   SBUS_Init(&sbus, &huart2);
 
   // 5. Inisialisasi PID untuk Roll (Aileron) dan Pitch (Elevator)
-  PID_Init(&pid_roll,  0.8f, 0.05f, 0.1f, -90.0f, 90.0f);
-  PID_Init(&pid_pitch, 0.8f, 0.05f, 0.1f, -90.0f, 90.0f);
+  PID_Init(&pid_roll,  0.8f, 0.05f, 0.1f, -45.0f, 45.0f);
+  PID_Init(&pid_pitch, 0.8f, 0.05f, 0.1f, -45.0f, 45.0f);
 
-  // 6. Daftarkan parameter PID & aktifkan RX UART1 jika MAV_OVER_UART == 1
+  // 6. Daftarkan parameter PID ke Mission Planner & aktifkan RX UART1 (57600 bps)
 #if USE_MAVLINK
   mav_register_param("PID_ROLL_P",  &pid_roll.Kp);
   mav_register_param("PID_ROLL_I",  &pid_roll.Ki);
@@ -176,12 +182,12 @@ int main(void)
             MPU6050_Update_Angle(&mpu);
         }
 
-        // B. Baca Barometer BMP280 (Suhu, Tekanan, Ketinggian)
+        // B. Baca Barometer (Suhu, Tekanan, Ketinggian)
         if (bmp_ok) {
             BMP280_Update(&hi2c1, &bmp);
         }
 
-        // C. Perhitungan Kendali (Mode Tes Sensor vs Mode Normal SBUS)
+        // C. Perhitungan Kendali (Mode Tes Sensor vs Mode Terbang Manual/Stabilize SBUS)
         roll_cmd  = 0.0f;
         pitch_cmd = 0.0f;
 
@@ -191,7 +197,7 @@ int main(void)
         pitch_cmd = PID_Compute(&pid_pitch, 0.0f, mpu.pitch, dt);
 #else
         if (SBUS_IsConnected(&sbus)) {
-            // Channel 5 (indeks 4) sebagai sakelar mode terbang (> 1500 = Stabilize PID)
+            // Channel 5 (indeks 4) sebagai sakelar mode terbang (> 1500 = Stabilize PID, <= 1500 = Manual)
             uint8_t mode_stabilize = (sbus.channels[4] > 1500) ? 1 : 0;
 
             if (mode_stabilize) {
@@ -202,7 +208,7 @@ int main(void)
                 roll_cmd  = PID_Compute(&pid_roll,  roll_setpoint,  mpu.roll,  dt);
                 pitch_cmd = PID_Compute(&pid_pitch, pitch_setpoint, mpu.pitch, dt);
             } else {
-                // Mode Manual: Stik langsung menggerakkan bidang kendali (-45 s.d. +45 derajat)
+                // Mode Manual: Reset integral PID & gerakkan bidang kendali langsung (-45 s.d. +45 derajat)
                 PID_Reset(&pid_roll);
                 PID_Reset(&pid_pitch);
 
@@ -210,7 +216,7 @@ int main(void)
                 pitch_cmd = SBUS_ChannelToFloat(sbus.channels[1], -MAX_MANUAL_DEFLECT, MAX_MANUAL_DEFLECT);
             }
         } else {
-            // Failsafe: Sinyal receiver hilang -> netralkan bidang kendali
+            // Failsafe: Sinyal receiver hilang -> netralkan bidang kendali (90 derajat)
             PID_Reset(&pid_roll);
             PID_Reset(&pid_pitch);
             roll_cmd  = 0.0f;
@@ -226,11 +232,12 @@ int main(void)
         Servo_SetAngle(&servo_aileron_right, aileron_right_angle);
         Servo_SetAngle(&servo_aileron_left,  aileron_left_angle);
         Servo_SetAngle(&servo_elevator,      elevator_angle);
-    }
 
+        // E. Kirim Telemetri MAVLink ke Mission Planner via USART1 (57600 bps)
 #if USE_MAVLINK
-    mav_telemetry_update(mpu.roll, mpu.pitch, roll_cmd, pitch_cmd, mpu.yaw, bmp.altitude);
+        mav_telemetry_update(mpu.roll, mpu.pitch, roll_cmd, pitch_cmd, mpu.yaw, bmp.altitude);
 #endif
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -247,9 +254,14 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
+  /** Configure the main internal regulator output voltage
+  */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -263,6 +275,8 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
@@ -283,6 +297,7 @@ void SystemClock_Config(void)
   */
 static void MX_I2C1_Init(void)
 {
+
   /* USER CODE BEGIN I2C1_Init 0 */
   __HAL_RCC_GPIOB_CLK_ENABLE();
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -299,6 +314,9 @@ static void MX_I2C1_Init(void)
   }
   /* USER CODE END I2C1_Init 0 */
 
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
   hi2c1.Init.ClockSpeed = 100000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
@@ -312,6 +330,10 @@ static void MX_I2C1_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
 }
 
 /**
@@ -321,10 +343,18 @@ static void MX_I2C1_Init(void)
   */
 static void MX_TIM2_Init(void)
 {
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
 
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 95;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -366,7 +396,11 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
+
 }
 
 /**
@@ -376,9 +410,17 @@ static void MX_TIM2_Init(void)
   */
 static void MX_TIM3_Init(void)
 {
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
 
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -403,16 +445,28 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
   HAL_TIM_MspPostInit(&htim3);
+
 }
 
 /**
-  * @brief USART1 Initialization Function
+  * @brief USART1 Initialization Function (Telemetry 57600 bps)
   * @param None
   * @retval None
   */
 static void MX_USART1_UART_Init(void)
 {
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
   huart1.Init.BaudRate = 57600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
@@ -425,6 +479,10 @@ static void MX_USART1_UART_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
 }
 
 /**
@@ -434,6 +492,14 @@ static void MX_USART1_UART_Init(void)
   */
 static void MX_USART2_UART_Init(void)
 {
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
   huart2.Init.BaudRate = 100000;
   huart2.Init.WordLength = UART_WORDLENGTH_9B;
@@ -446,6 +512,10 @@ static void MX_USART2_UART_Init(void)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
 }
 
 /**
@@ -455,9 +525,18 @@ static void MX_USART2_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+
+  /* USER CODE END MX_GPIO_Init_1 */
+
+  /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -495,14 +574,27 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   */
 void Error_Handler(void)
 {
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)
   {
   }
+  /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
