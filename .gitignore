@@ -1,0 +1,9 @@
+# STM32CubeIDE build outputs
+Debug/
+Release/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
